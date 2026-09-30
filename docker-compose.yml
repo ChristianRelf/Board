@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: board
+      POSTGRES_PASSWORD: board
+      POSTGRES_DB: board
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U board"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://board:board@db:5432/board
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: ${AUTH_URL:-https://trello.chrisrelf.xyz}
+      AUTH_TRUST_HOST: "true"
+      AUTH_DISCORD_ID: ${AUTH_DISCORD_ID}
+      AUTH_DISCORD_SECRET: ${AUTH_DISCORD_SECRET}
+      ALLOWED_DISCORD_IDS: ${ALLOWED_DISCORD_IDS}
+      UPLOAD_DIR: /data/uploads
+    ports: ["3000:3000"]
+    volumes: ["uploads:/data/uploads"]
+
+volumes:
+  pgdata:
+  uploads:

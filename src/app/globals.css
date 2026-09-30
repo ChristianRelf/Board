@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+/* ───────────────────────── design tokens ─────────────────────────
+   One neutral ramp, one accent, no gradients. Everything else is
+   opacity over the ramp so surfaces stack predictably on any board
+   background.                                                      */
+
+@theme {
+  --color-bg: #08090a;
+  --color-surface: #101113;
+  --color-raised: #16181b;
+  --color-hover: #1d2024;
+  --color-line: #232629;
+  --color-line-soft: #1a1d20;
+  --color-text: #eceef1;
+  --color-muted: #9198a1;
+  --color-faint: #63696f;
+  --color-accent: #5b6ef5;
+  --color-accent-soft: #232a4d;
+  --color-danger: #d9544f;
+  --color-warn: #d9a84e;
+  --color-ok: #58a97a;
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 13px;
+  --radius-xl: 18px;
+
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1);
+
+  --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 28px -6px rgb(0 0 0 / 0.55);
+  --shadow-card: 0 1px 1px rgb(0 0 0 / 0.25);
+  --shadow-drag: 0 12px 32px -8px rgb(0 0 0 / 0.65);
+}
+
+:root[data-theme="light"] {
+  --color-bg: #fbfbfc;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-hover: #f1f2f4;
+  --color-line: #e4e6e9;
+  --color-line-soft: #eceef0;
+  --color-text: #16181b;
+  --color-muted: #656b73;
+  --color-faint: #8c939b;
+  --color-accent: #4553e0;
+  --color-accent-soft: #e8eaff;
+  --shadow-pop: 0 1px 2px rgb(16 24 40 / 0.06), 0 12px 32px -10px rgb(16 24 40 / 0.18);
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.07);
+  --shadow-drag: 0 14px 34px -10px rgb(16 24 40 / 0.28);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 35%, transparent);
+}
+
+/* focus: one ring, everywhere */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-accent) 70%, transparent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* scrollbars stay out of the way until hovered */
+@utility scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  &:hover {
+    scrollbar-color: color-mix(in oklab, var(--color-text) 18%, transparent)
+      transparent;
+  }
+  &::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 99px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  &:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--color-text) 18%, transparent);
+    background-clip: content-box;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@utility glass {
+  background: color-mix(in oklab, var(--color-surface) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* board surfaces sit on top of user backgrounds, so they get their own
+   translucency rather than a flat fill */
+@utility panel {
+  background: color-mix(in oklab, var(--color-surface) 82%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in oklab, var(--color-line) 80%, transparent);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@utility animate-fade-up {
+  animation: fade-up 0.32s var(--ease-out-quint) both;
+}
+
+@utility animate-pop-in {
+  animation: pop-in 0.18s var(--ease-out-quint) both;
+}
+
+@utility skeleton {
+  background: linear-gradient(
+      90deg,
+      var(--color-raised) 0%,
+      var(--color-hover) 40%,
+      var(--color-raised) 80%
+    )
+    0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* dnd-kit sets this while dragging; kill text selection artefacts */
+body[data-dragging="true"] {
+  cursor: grabbing;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
