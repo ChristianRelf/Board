@@ -14,7 +14,7 @@ export const POST = route<P, unknown>(async (req, { params }: Ctx<P>) => {
   const { id } = await params;
   const card = await loadCard(id);
   await requireEdit(card.boardId);
-  const { text } = z.object({ text: z.string().trim().min(1).max(500) }).parse(await req.json());
+  const { text, itemId } = z.object({ itemId: z.string().uuid().optional(), text: z.string().trim().min(1).max(500) }).parse(await req.json());
 
   const last = await db
     .select({ position: checkItems.position })
@@ -25,7 +25,7 @@ export const POST = route<P, unknown>(async (req, { params }: Ctx<P>) => {
 
   await db
     .insert(checkItems)
-    .values({ cardId: id, text, position: (last[0]?.position ?? 0) + STEP });
+    .values({ id: itemId, cardId: id, text, position: (last[0]?.position ?? 0) + STEP });
 
   const detail = await getCardDetail(id);
   await publish(card.boardId, { t: "card.detail", card: detail }, origin(req));

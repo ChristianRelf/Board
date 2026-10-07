@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { BOARD_FONTS } from "@/lib/appearance";
+import { ConnectionStatus } from "./ConnectionStatus";
 import { BoardProvider, useBoard } from "./store";
 import { BoardCanvas } from "./BoardCanvas";
 import { BoardHeader } from "./BoardHeader";
@@ -33,6 +35,15 @@ function Shell({
 }) {
   const { board, open } = useBoard();
   const bg = board.background;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (bg?.font) root.style.setProperty("--board-font", BOARD_FONTS[bg.font]);
+    if (bg?.accent) {
+      root.style.setProperty("--color-accent", bg.accent);
+      root.style.setProperty("--color-accent-soft", `color-mix(in srgb, ${bg.accent} 18%, var(--color-surface))`);
+    }
+    return () => { for (const prop of ["--board-font", "--color-accent", "--color-accent-soft"]) root.style.removeProperty(prop); };
+  }, [bg?.font, bg?.accent]);
 
   useEffect(() => {
     if (initialCardId) open(initialCardId);
@@ -40,7 +51,7 @@ function Shell({
   }, [initialCardId]);
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-hidden">
+    <div data-density={bg?.density ?? "comfortable"} className="relative isolate flex h-dvh flex-col overflow-hidden">
       {/* background layer, kept behind everything and part of exports */}
       <div
         aria-hidden
@@ -69,6 +80,7 @@ function Shell({
         <BoardCanvas />
       </main>
 
+      {variant === "app" && <ConnectionStatus />}
       <CardModal />
     </div>
   );

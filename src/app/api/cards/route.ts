@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, cards, lists } from "@/lib/db";
-import { HttpError, requireEdit } from "@/lib/auth-helpers";
+import { HttpError, requireEdit, requireView } from "@/lib/auth-helpers";
 import { route, origin, log } from "@/lib/route";
 import { publish } from "@/lib/events";
 import { STEP } from "@/lib/order";
 import { getCard } from "@/lib/board-data";
 
 const Body = z.object({
+  cardId: z.string().uuid().optional(),
   listId: z.string(),
   title: z.string().trim().min(1).max(500),
   position: z.number().optional(),
@@ -20,6 +21,7 @@ export const POST = route(async (req) => {
   if (!list) throw new HttpError(404, "List not found");
   const { user } = await requireEdit(list.boardId);
 
+  if (body.linkedBoardId) await requireView(body.linkedBoardId);
   const last = await db
     .select({ position: cards.position })
     .from(cards)
@@ -31,6 +33,7 @@ export const POST = route(async (req) => {
   const [row] = await db
     .insert(cards)
     .values({
+      id: body.cardId,
       boardId: list.boardId,
       listId: body.listId,
       title: body.title,

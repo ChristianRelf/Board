@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db, boardLinks, boards } from "@/lib/db";
-import { HttpError, requireEdit, requireView } from "@/lib/auth-helpers";
+import { HttpError, requireAdmin, requireView } from "@/lib/auth-helpers";
 import { route, origin, type Ctx } from "@/lib/route";
 import { publish } from "@/lib/events";
 
@@ -10,7 +10,7 @@ type P = { id: string };
 /** Board-to-board links, created by dropping one board card onto another. */
 export const POST = route<P, unknown>(async (req, { params }: Ctx<P>) => {
   const { id } = await params;
-  await requireEdit(id);
+  await requireAdmin(id);
   const { toBoardId } = z.object({ toBoardId: z.string() }).parse(await req.json());
   if (toBoardId === id) throw new HttpError(422, "A board can't link to itself");
   await requireView(toBoardId);
@@ -25,7 +25,7 @@ export const POST = route<P, unknown>(async (req, { params }: Ctx<P>) => {
 
 export const DELETE = route<P, unknown>(async (req, { params }: Ctx<P>) => {
   const { id } = await params;
-  await requireEdit(id);
+  await requireAdmin(id);
   const to = new URL(req.url).searchParams.get("toBoardId");
   if (!to) throw new HttpError(422, "toBoardId required");
   await db

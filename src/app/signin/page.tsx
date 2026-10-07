@@ -2,6 +2,9 @@ import { redirect } from "next/navigation";
 import { auth, signIn } from "@/auth";
 import { Button } from "@/components/ui/Button";
 import { Hint } from "@/components/ui/Hint";
+import { LaptopMinimal } from "lucide-react";
+import { doDevSignIn } from "@/app/actions";
+import { devLoginEnabled } from "@/lib/dev-login";
 
 export const metadata = { title: "Sign in" };
 
@@ -51,6 +54,24 @@ export default async function SignIn({
             Continue with Discord
           </Button>
         </form>
+
+        {devLoginEnabled && (
+          <form
+            className="mt-3"
+            action={async () => {
+              "use server";
+              await doDevSignIn(callbackUrl);
+            }}
+          >
+            <Button type="submit" variant="outline" size="lg" className="w-full">
+              <LaptopMinimal size={17} aria-hidden="true" />
+              Continue locally
+            </Button>
+            <p className="mt-2 text-center text-[11.5px] text-faint">
+              Use the local demo account without Discord.
+            </p>
+          </form>
+        )}
 
         <p className="mt-5 flex items-center gap-1.5 text-[11.5px] text-faint">
           Private instance

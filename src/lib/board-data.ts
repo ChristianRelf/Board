@@ -53,7 +53,7 @@ export async function getSnapshot(
       .where(and(eq(lists.boardId, boardId), isNull(lists.archivedAt)))
       .orderBy(asc(lists.position)),
     cardsForBoard(boardId),
-    db.select().from(labels).where(eq(labels.boardId, boardId)),
+    db.select().from(labels).where(eq(labels.boardId, boardId)).orderBy(asc(labels.position)),
     db
       .select({
         id: users.id,
@@ -90,67 +90,41 @@ export async function getSnapshot(
       collapsed: l.collapsed,
     })),
     cards: cardRows,
-    labels: labelRows.map((l) => ({ id: l.id, name: l.name, color: l.color })),
+    labels: labelRows.map((l) => ({ id: l.id, name: l.name, color: l.color, position: l.position })),
     members: memberRows as BoardSnapshot["members"],
     linkedBoards: links as BoardRef[],
   };
 }
 
-export async function cardsForBoard(boardId: string): Promise<CardT[]> {
-  const rows = await db
-    .select({
-      card: cards,
-      linked: boardRefCols,
-      labelIds: sql<string[]>`coalesce(array_agg(distinct ${cardLabels.labelId}) filter (where ${cardLabels.labelId} is not null), '{}')`,
-      memberIds: sql<string[]>`coalesce(array_agg(distinct ${cardMembers.userId}) filter (where ${cardMembers.userId} is not null), '{}')`,
-      comments: sql<number>`count(distinct ${comments.id})`,
-      attachments: sql<number>`count(distinct ${attachments.id})`,
-      checkTotal: sql<number>`count(distinct ${checkItems.id})`,
-      checkDone: sql<number>`count(distinct ${checkItems.id}) filter (where ${checkItems.done})`,
-    })
-    .from(cards)
-    .leftJoin(boards, eq(boards.id, cards.linkedBoardId))
-    .leftJoin(cardLabels, eq(cardLabels.cardId, cards.id))
-    .leftJoin(cardMembers, eq(cardMembers.cardId, cards.id))
-    .leftJoin(comments, eq(comments.cardId, cards.id))
-    .leftJoin(attachments, eq(attachments.cardId, cards.id))
-    .leftJoin(checkItems, eq(checkItems.cardId, cards.id))
-    .where(and(eq(cards.boardId, boardId), isNull(cards.archivedAt)))
-    .groupBy(cards.id, boards.id)
-    .orderBy(asc(cards.position));
+// Independent indexed subqueries avoid a labels × comments × checks cross product.
+const cardColumns = {
+  card: cards,
+  linked: boardRefCols,
+  labelIds: sql<string[]>`ARRAY(SELECT label_id FROM card_label WHERE card_id = ${cards.id})`,
+  memberIds: sql<string[]>`ARRAY(SELECT user_id FROM card_member WHERE card_id = ${cards.id})`,
+  comments: sql<number>`(SELECT count(*) FROM comment WHERE card_id = ${cards.id})`,
+  attachments: sql<number>`(SELECT count(*) FROM attachment WHERE card_id = ${cards.id})`,
+  checkTotal: sql<number>`(SELECT count(*) FROM check_item WHERE card_id = ${cards.id})`,
+  checkDone: sql<number>`(SELECT count(*) FROM check_item WHERE card_id = ${cards.id} AND done)`,
+};
 
+export async function cardsForBoard(boardId: string): Promise<CardT[]> {
+  const rows = await db.select(cardColumns).from(cards)
+    .leftJoin(boards, eq(boards.id, cards.linkedBoardId))
+    .where(and(eq(cards.boardId, boardId), isNull(cards.archivedAt)))
+    .orderBy(asc(cards.position));
   return rows.map(toCard);
 }
 
 export async function getCard(cardId: string): Promise<CardT | null> {
-  const rows = await db
-    .select({
-      card: cards,
-      linked: boardRefCols,
-      labelIds: sql<string[]>`coalesce(array_agg(distinct ${cardLabels.labelId}) filter (where ${cardLabels.labelId} is not null), '{}')`,
-      memberIds: sql<string[]>`coalesce(array_agg(distinct ${cardMembers.userId}) filter (where ${cardMembers.userId} is not null), '{}')`,
-      comments: sql<number>`count(distinct ${comments.id})`,
-      attachments: sql<number>`count(distinct ${attachments.id})`,
-      checkTotal: sql<number>`count(distinct ${checkItems.id})`,
-      checkDone: sql<number>`count(distinct ${checkItems.id}) filter (where ${checkItems.done})`,
-    })
-    .from(cards)
-    .leftJoin(boards, eq(boards.id, cards.linkedBoardId))
-    .leftJoin(cardLabels, eq(cardLabels.cardId, cards.id))
-    .leftJoin(cardMembers, eq(cardMembers.cardId, cards.id))
-    .leftJoin(comments, eq(comments.cardId, cards.id))
-    .leftJoin(attachments, eq(attachments.cardId, cards.id))
-    .leftJoin(checkItems, eq(checkItems.cardId, cards.id))
-    .where(eq(cards.id, cardId))
-    .groupBy(cards.id, boards.id);
-
+  const rows = await db.select(cardColumns).from(cards)
+    .leftJoin(boards, eq(boards.id, cards.linkedBoardId)).where(eq(cards.id, cardId));
   return rows[0] ? toCard(rows[0]) : null;
 }
 
 export async function getCardDetail(cardId: string): Promise<CardDetail | null> {
-  const card = await getCard(cardId);
-  if (!card) return null;
-  const [atts, coms, checks] = await Promise.all([
+  const [card, atts, coms, checks] = await Promise.all([
+    getCard(cardId),
     db
       .select()
       .from(attachments)
@@ -176,6 +150,7 @@ export async function getCardDetail(cardId: string): Promise<CardDetail | null> 
       .orderBy(asc(checkItems.position)),
   ]);
 
+  if (!card) return null;
   return {
     ...card,
     attachments: atts.map((a) => ({
@@ -239,6 +214,7 @@ export async function listBoards(userId: string) {
       background: boards.background,
       starred: boards.starred,
       ownerId: boards.ownerId,
+      canManage: sql<boolean>`(${boards.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM board_member m WHERE m.board_id = ${boards.id} AND m.user_id = ${userId} AND m.role IN ('owner', 'admin')))`,
       updatedAt: boards.updatedAt,
     })
     .from(boards)

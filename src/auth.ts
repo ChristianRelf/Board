@@ -2,6 +2,7 @@ import NextAuth, { type DefaultSession } from "next-auth";
 import Discord from "next-auth/providers/discord";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db, users, accounts, sessions, verificationTokens } from "@/lib/db";
+import { devLoginEnabled, devSessionCookie } from "@/lib/dev-login";
 
 declare module "next-auth" {
   interface Session {
@@ -25,6 +26,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     verificationTokensTable: verificationTokens,
   }),
   session: { strategy: "database" },
+  cookies: devLoginEnabled ? { sessionToken: devSessionCookie } : undefined,
   pages: { signIn: "/signin", error: "/signin" },
   providers: [
     Discord({

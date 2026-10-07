@@ -8,14 +8,17 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
-import { api, bg, CLIENT_ID } from "@/lib/client";
+import { api, bg, CLIENT_ID, newId } from "@/lib/client";
 import { positionAt } from "@/lib/order";
 import type {
   BoardSnapshot,
   CardDetail,
   CardT,
+  CheckItem,
+  BoardRef,
   Label,
   ListT,
   Member,
@@ -36,9 +39,18 @@ type State = BoardSnapshot & {
   filter: Filter;
   openCardId: string | null;
   connected: boolean;
+  latency: number | null;
+  lastChecked: number | null;
+  pendingChecks: Record<string, CheckItem[]>;
+  pendingCards: string[];
 };
 
 type Action =
+  | { type: "card.pending"; card: CardT }
+  | { type: "card.settled"; id: string }
+  | { type: "links"; links: BoardRef[] }
+  | { type: "check.pending"; cardId: string; item: CheckItem }
+  | { type: "check.settled"; cardId: string; id: string }
   | { type: "snapshot"; snapshot: BoardSnapshot }
   | { type: "board"; board: Partial<State["board"]> }
   | { type: "list.upsert"; list: ListT }
@@ -52,14 +64,25 @@ type Action =
   | { type: "peers"; peers: Peer[] }
   | { type: "filter"; filter: Partial<Filter> }
   | { type: "open"; id: string | null }
-  | { type: "connected"; value: boolean };
+  | { type: "connected"; value: boolean }
+  | { type: "latency"; value: number | null };
 
 const emptyFilter: Filter = { q: "", labelIds: [], memberIds: [], due: "any" };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
+    case "card.pending":
+      return { ...s, cards: upsert(s.cards, a.card).sort(byPos), pendingCards: [...s.pendingCards, a.card.id] };
+    case "card.settled":
+      return { ...s, pendingCards: s.pendingCards.filter(id => id !== a.id) };
+    case "links":
+      return { ...s, linkedBoards: a.links };
+    case "check.pending":
+      return { ...s, pendingChecks: { ...s.pendingChecks, [a.cardId]: [...(s.pendingChecks[a.cardId] ?? []), a.item] } };
+    case "check.settled":
+      return { ...s, pendingChecks: { ...s.pendingChecks, [a.cardId]: (s.pendingChecks[a.cardId] ?? []).filter(i => i.id !== a.id) } };
     case "snapshot":
-      return { ...s, ...a.snapshot };
+      return { ...s, ...a.snapshot, detail: {} };
     case "board":
       return { ...s, board: { ...s.board, ...a.board } };
     case "list.upsert":
@@ -81,7 +104,7 @@ function reducer(s: State, a: Action): State {
         cards: upsert(s.cards, stripDetail(a.card)).sort(byPos),
       };
     case "label.upsert":
-      return { ...s, labels: upsert(s.labels, a.label) };
+      return { ...s, labels: upsert(s.labels, a.label).sort(byPos) };
     case "label.remove":
       return {
         ...s,
@@ -99,6 +122,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, filter: { ...s.filter, ...a.filter } };
     case "open":
       return { ...s, openCardId: a.id };
+    case "latency":
+      return { ...s, latency: a.value, lastChecked: Date.now() };
     case "connected":
       return { ...s, connected: a.value };
   }
@@ -138,14 +163,27 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
     filter: emptyFilter,
     openCardId: null,
     connected: false,
+    latency: 0,
+    lastChecked: null,
+    pendingChecks: {},
+    pendingCards: [],
   } satisfies State);
 
   const boardId = state.board.id;
-  const canEdit = state.role === "owner" || state.role === "editor";
+  const canManage = state.role === "owner" || state.role === "admin";
+  const canEdit = live && (canManage || state.role === "editor");
+  const [labelsExpanded, setLabelsExpanded] = useState(false);
+  const detailRequests = useRef(new Map<string, Promise<CardDetail>>());
+  const detailLoadedAt = useRef(new Map<string, number>());
+  const checkQueues = useRef(new Map<string, Promise<unknown>>());
+  useEffect(() => {
+    setLabelsExpanded(document.cookie.split("; ").includes("board-labels-expanded=true"));
+  }, []);
   const stateRef = useRef(state);
   stateRef.current = state;
 
   const refresh = useCallback(async () => {
+    detailLoadedAt.current.clear();
     const fresh = await api.get<BoardSnapshot>(`/api/boards/${boardId}`);
     dispatch({ type: "snapshot", snapshot: fresh });
   }, [boardId]);
@@ -154,7 +192,12 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
   useEffect(() => {
     if (!live) return;
     const es = new EventSource(`/api/boards/${boardId}/stream`);
-    es.onopen = () => dispatch({ type: "connected", value: true });
+    let opened = false;
+    es.onopen = () => {
+      dispatch({ type: "connected", value: true });
+      if (opened) void refresh().catch(() => {});
+      opened = true;
+    };
     es.onerror = () => dispatch({ type: "connected", value: false });
     es.onmessage = (m) => {
       const { ev, origin } = JSON.parse(m.data) as {
@@ -180,11 +223,15 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
         case "label.remove":
           return dispatch({ type: "label.remove", id: ev.id as string });
         case "members":
+          void refresh().catch(() => { window.location.href = "/"; });
           return dispatch({ type: "members", members: ev.members as Member[] });
         case "presence":
           return dispatch({ type: "peers", peers: ev.peers as Peer[] });
         case "reload":
-          void refresh();
+          void refresh().then(() => {
+            const id = stateRef.current.openCardId;
+            if (id) void actionsRef.current?.loadDetail(id, true);
+          }).catch(() => { window.location.href = "/"; });
       }
     };
     return () => es.close();
@@ -194,11 +241,13 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
   useEffect(() => {
     if (!live) return;
     let stopped = false;
-    const ping = () =>
-      api
+    const ping = () => {
+      const started = performance.now();
+      return api
         .post<{ peers: Peer[] }>(`/api/boards/${boardId}/presence`, {})
-        .then((r) => !stopped && dispatch({ type: "peers", peers: r.peers }))
-        .catch(() => {});
+        .then((r) => { if (!stopped) { dispatch({ type: "peers", peers: r.peers }); dispatch({ type: "latency", value: performance.now() - started }); } })
+        .catch(() => { if (!stopped) dispatch({ type: "latency", value: null }); });
+    };
     ping();
     const t = setInterval(ping, 12_000);
     const bye = () => void api.del(`/api/boards/${boardId}/presence`).catch(() => {});
@@ -248,41 +297,49 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
       if (!canEdit) throw new Error("read only");
     };
 
+    const manage = () => { if (!canManage) throw new Error("Admin access required"); };
     return {
       refresh,
+      toggleLabelsExpanded() {
+        setLabelsExpanded(prev => {
+          const next = !prev;
+          document.cookie = `board-labels-expanded=${next}; Path=/; Max-Age=31536000; SameSite=Lax`;
+          return next;
+        });
+      },
       open: (id: string | null) => dispatch({ type: "open", id }),
       setFilter: (filter: Partial<Filter>) => dispatch({ type: "filter", filter }),
       clearFilter: () => dispatch({ type: "filter", filter: emptyFilter }),
 
       async addList(title: string) {
-        guard();
+        manage();
         const list = await bg(api.post<ListT>("/api/lists", { boardId, title }));
         dispatch({ type: "list.upsert", list });
         return list;
       },
 
       renameList(id: string, title: string) {
-        guard();
+        manage();
         const prev = stateRef.current.lists.find((l) => l.id === id);
         dispatch({ type: "list.upsert", list: { ...prev!, title } });
         bg(api.patch(`/api/lists/${id}`, { title }), refresh);
       },
 
       toggleListCollapsed(id: string) {
-        guard();
+        manage();
         const prev = stateRef.current.lists.find((l) => l.id === id)!;
         dispatch({ type: "list.upsert", list: { ...prev, collapsed: !prev.collapsed } });
         bg(api.patch(`/api/lists/${id}`, { collapsed: !prev.collapsed }), refresh);
       },
 
       removeList(id: string) {
-        guard();
+        manage();
         dispatch({ type: "list.remove", id });
         bg(api.del(`/api/lists/${id}`), refresh);
       },
 
       moveList(id: string, index: number) {
-        guard();
+        manage();
         const others = stateRef.current.lists.filter((l) => l.id !== id);
         const position = positionAt(others, index);
         const list = stateRef.current.lists.find((l) => l.id === id)!;
@@ -292,11 +349,24 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
 
       async addCard(listId: string, title: string, linkedBoardId?: string) {
         guard();
-        const card = await bg(
-          api.post<CardT>("/api/cards", { listId, title, linkedBoardId }),
-        );
-        dispatch({ type: "card.upsert", card });
-        return card;
+        const id = newId();
+        const existing = stateRef.current.cards.filter(c => c.listId === listId);
+        dispatch({ type: "card.pending", card: {
+          id, listId, title, position: Math.max(0, ...existing.map(c => c.position)) + 1024,
+          description: null, startAt: null, dueAt: null, dueDone: false, cover: null,
+          linkedBoard: stateRef.current.linkedBoards.find(b => b.id === linkedBoardId) ?? null,
+          labelIds: [], memberIds: [], counts: { comments: 0, attachments: 0, checkDone: 0, checkTotal: 0 },
+          createdAt: new Date().toISOString(),
+        } });
+        try {
+          const card = await bg(api.post<CardT>("/api/cards", { cardId: id, listId, title, linkedBoardId }));
+          dispatch({ type: "card.upsert", card });
+          return card;
+        } catch {
+          dispatch({ type: "card.remove", id });
+        } finally {
+          dispatch({ type: "card.settled", id });
+        }
       },
 
       moveCard(id: string, listId: string, index: number) {
@@ -372,7 +442,17 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
         return label;
       },
 
-      updateLabel(id: string, patch: { name?: string | null; color?: string }) {
+      reorderLabels(ids: string[]) {
+        guard();
+        const labels = stateRef.current.labels;
+        ids.forEach((id, i) => {
+          const label = labels.find(l => l.id === id);
+          if (label) dispatch({ type: "label.upsert", label: { ...label, position: i * 1024 } });
+        });
+        bg(api.patch(`/api/boards/${boardId}/labels`, { ids }), refresh);
+      },
+
+      updateLabel(id: string, patch: { name?: string | null; color?: string; position?: number }) {
         guard();
         const prev = stateRef.current.labels.find((l) => l.id === id)!;
         dispatch({ type: "label.upsert", label: { ...prev, ...patch } });
@@ -386,17 +466,26 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
       },
 
       patchBoard(patch: Partial<State["board"]>) {
-        guard();
+        manage();
         dispatch({ type: "board", board: patch });
         bg(api.patch(`/api/boards/${boardId}`, patch), refresh);
       },
 
       /* card detail ------------------------------------------------ */
 
-      async loadDetail(cardId: string) {
-        const card = await api.get<CardDetail>(`/api/cards/${cardId}`);
-        dispatch({ type: "card.detail", card });
-        return card;
+      async loadDetail(cardId: string, force = false): Promise<CardDetail> {
+        const cached = stateRef.current.detail[cardId];
+        if (!force && cached && Date.now() - (detailLoadedAt.current.get(cardId) ?? 0) < 30_000) return cached;
+        const pending = detailRequests.current.get(cardId);
+        if (pending) return pending;
+        const request = api.get<CardDetail>(`/api/cards/${cardId}`).then(card => {
+          const current = stateRef.current.cards.find(c => c.id === cardId);
+          dispatch({ type: "card.detail", card: { ...card, ...(current ?? {}), counts: card.counts } });
+          detailLoadedAt.current.set(cardId, Date.now());
+          return card;
+        }).finally(() => detailRequests.current.delete(cardId));
+        detailRequests.current.set(cardId, request);
+        return request;
       },
 
       async addComment(cardId: string, body: string) {
@@ -408,13 +497,22 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
       async removeComment(cardId: string, id: string) {
         guard();
         await bg(api.del(`/api/comments/${id}`));
-        void actionsRef.current?.loadDetail(cardId);
+        void actionsRef.current?.loadDetail(cardId, true);
       },
 
       async addCheck(cardId: string, text: string) {
         guard();
-        const card = await bg(api.post<CardDetail>(`/api/cards/${cardId}/checks`, { text }));
-        dispatch({ type: "card.detail", card });
+        const id = newId();
+        dispatch({ type: "check.pending", cardId, item: { id, text, done: false, position: Date.now() } });
+        // Serialize creates per card so rapid Enter presses cannot overwrite each other.
+        const previous = checkQueues.current.get(cardId) ?? Promise.resolve();
+        const request = previous.catch(() => {}).then(async () => {
+          const card = await bg(api.post<CardDetail>(`/api/cards/${cardId}/checks`, { text, itemId: id }));
+          dispatch({ type: "card.detail", card });
+        }).finally(() => dispatch({ type: "check.settled", cardId, id }));
+        checkQueues.current.set(cardId, request);
+        try { await request; } catch { /* bg reports the failed save and the pending item is removed */ }
+        finally { if (checkQueues.current.get(cardId) === request) checkQueues.current.delete(cardId); }
       },
 
       async patchCheck(cardId: string, id: string, patch: { text?: string; done?: boolean }) {
@@ -425,6 +523,8 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
             type: "card.detail",
             card: {
               ...detail,
+              ...stateRef.current.cards.find(c => c.id === cardId),
+              counts: { ...detail.counts, checkDone: detail.checkItems.filter(i => (i.id === id ? patch.done ?? i.done : i.done)).length },
               checkItems: detail.checkItems.map((i) => (i.id === id ? { ...i, ...patch } : i)),
             },
           });
@@ -435,7 +535,7 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
       async removeCheck(cardId: string, id: string) {
         guard();
         await bg(api.del(`/api/checks/${id}`));
-        void actionsRef.current?.loadDetail(cardId);
+        void actionsRef.current?.loadDetail(cardId, true);
       },
 
       async upload(cardId: string, files: File[]) {
@@ -446,6 +546,7 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
           api.post<CardDetail>(`/api/cards/${cardId}/attachments`, form),
         );
         dispatch({ type: "card.detail", card });
+        return card;
       },
 
       async attachLink(cardId: string, url: string, name?: string) {
@@ -459,43 +560,49 @@ function useStoreValue(snapshot: BoardSnapshot, live: boolean) {
       async removeAttachment(cardId: string, id: string) {
         guard();
         await bg(api.del(`/api/attachments/${id}`));
-        void actionsRef.current?.loadDetail(cardId);
+        void actionsRef.current?.loadDetail(cardId, true);
       },
 
-      async addMember(userId: string, role: "editor" | "viewer" = "editor") {
-        guard();
+      async addMember(userId: string, role: "admin" | "editor" | "viewer" = "editor") {
+        manage();
         const members = await bg(
           api.post<Member[]>(`/api/boards/${boardId}/members`, { userId, role }),
         );
         dispatch({ type: "members", members });
+        await refresh().catch(() => { window.location.href = "/"; });
       },
 
       async removeMember(userId: string) {
-        guard();
+        manage();
         const members = await bg(
           api.del<Member[]>(`/api/boards/${boardId}/members?userId=${userId}`),
         );
         dispatch({ type: "members", members });
+        await refresh().catch(() => { window.location.href = "/"; });
       },
 
-      async linkBoard(toBoardId: string) {
-        guard();
-        await bg(api.post(`/api/boards/${boardId}/links`, { toBoardId }));
-        await refresh();
+      async linkBoard(board: BoardRef) {
+        manage();
+        const prev = stateRef.current.linkedBoards;
+        dispatch({ type: "links", links: upsert(prev, board) });
+        try { await bg(api.post(`/api/boards/${boardId}/links`, { toBoardId: board.id })); }
+        catch { dispatch({ type: "links", links: stateRef.current.linkedBoards.filter(b => b.id !== board.id) }); }
       },
 
       async unlinkBoard(toBoardId: string) {
-        guard();
-        await bg(api.del(`/api/boards/${boardId}/links?toBoardId=${toBoardId}`));
-        await refresh();
+        manage();
+        const prev = stateRef.current.linkedBoards;
+        dispatch({ type: "links", links: prev.filter(b => b.id !== toBoardId) });
+        try { await bg(api.del(`/api/boards/${boardId}/links?toBoardId=${toBoardId}`)); }
+        catch { await refresh(); }
       },
     };
-  }, [boardId, canEdit, cardsByList, refresh]);
+  }, [boardId, canEdit, canManage, cardsByList, refresh]);
 
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
-  return { ...state, canEdit, cardsByList, matches, ...actions };
+  return { ...state, canEdit, canManage: live && canManage, labelsExpanded, cardsByList, matches, ...actions };
 }
 
 export function BoardProvider({

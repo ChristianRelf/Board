@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { db, boards, boardMembers } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
 
-export type Role = "owner" | "editor" | "viewer";
+export type Role = "owner" | "admin" | "editor" | "viewer";
 
 export async function currentUser() {
   const session = await auth();
@@ -46,7 +46,7 @@ export async function boardAccess(boardId: string) {
 export async function requireEdit(boardId: string) {
   const { board, role, user } = await boardAccess(boardId);
   if (!board) throw new HttpError(404, "Board not found");
-  if (role !== "owner" && role !== "editor")
+  if (role !== "owner" && role !== "admin" && role !== "editor")
     throw new HttpError(403, "You can only read this board");
   return { board, role, user: user! };
 }
@@ -55,5 +55,12 @@ export async function requireView(boardId: string) {
   const ctx = await boardAccess(boardId);
   if (!ctx.board) throw new HttpError(404, "Board not found");
   if (!ctx.role) throw new HttpError(403, "This board is private");
+  return ctx;
+}
+
+export async function requireAdmin(boardId: string) {
+  const ctx = await requireEdit(boardId);
+  if (ctx.role !== "owner" && ctx.role !== "admin")
+    throw new HttpError(403, "Only admins can manage this board");
   return ctx;
 }

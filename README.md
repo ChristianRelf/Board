@@ -98,6 +98,48 @@ change optimistically and ignores the echo of its own write (`x-client-id`).
 
 ### Local demo data
 
+When running the dev server, choose **Continue locally** on the sign-in page to
+use the local demo account without Discord. It creates a one-day session and
+reuses `dev-user-1`, preserving existing demo boards. This option and its server
+action are disabled in production.
+
 `node scripts/seed-dev.mjs` makes two users, a couple of boards and a session
 token you can paste into a cookie — handy for poking at the UI without a
 Discord app. Development only; it writes fixed user ids.
+
+### Board controls and access
+
+- Label pills expand together; the preference is saved in a one-year cookie.
+  The card label picker shows the most-used labels in that column. **See more**
+  exposes every label and its ordering controls.
+- Card covers accept colours, uploaded images, existing image attachments and
+  direct image URLs. Checklist items save on Enter or blur and appear immediately.
+- New boards launch with an animated arrow, then open **Appearance** for background
+  photos, colours, fonts, accent colours and card spacing. Reduced motion is respected.
+- **Activity** opens a side drawer. Admins can save and restore board backups there.
+  Every restore first backs up the current state. Backups contain board content and
+  appearance, not membership or visibility. Uploaded files referenced by backups are
+  retained; back up the uploads volume alongside Postgres for disaster recovery.
+- **Viewer** can read; **Editor** can create and edit cards and their contents;
+  **Admin** can also manage lists, appearance, visibility, linked boards, backups and
+  membership. The owner retains admin access and is the only person who can delete
+  the board. These permissions are checked by the API.
+- The bottom-left cloud reports live connectivity, slow connections and offline state.
+
+After updating an existing installation, run `pnpm db:push` before starting the app.
+This adds label ordering and the `board_backup` table; existing boards are preserved.
+
+### Integration checks
+
+Start the local dev server, then run:
+
+```bash
+TEST_BASE_URL=http://localhost:3010 pnpm test:integration
+```
+
+The checks create isolated temporary accounts and boards, exercise role boundaries,
+label ordering, image covers, checklist counts, backup restoration and large card
+updates, then remove their data. Use a local development database.
+
+To build without overwriting a running dev server’s output, use
+`BOARD_BUILD_DIR=.next-validation pnpm build`.

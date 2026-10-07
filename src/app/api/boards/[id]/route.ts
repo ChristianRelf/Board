@@ -1,7 +1,8 @@
+import { BackgroundInput } from "@/lib/appearance";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, boards } from "@/lib/db";
-import { HttpError, requireEdit, requireView } from "@/lib/auth-helpers";
+import { HttpError, requireAdmin, requireView } from "@/lib/auth-helpers";
 import { route, origin, type Ctx } from "@/lib/route";
 import { getSnapshot } from "@/lib/board-data";
 import { publish } from "@/lib/events";
@@ -19,14 +20,12 @@ const Patch = z.object({
   description: z.string().max(2000).nullish(),
   visibility: z.enum(["private", "public"]).optional(),
   starred: z.boolean().optional(),
-  background: z
-    .object({ kind: z.enum(["color", "image"]), value: z.string(), dim: z.number().optional() })
-    .nullish(),
+  background: BackgroundInput.nullish(),
 });
 
 export const PATCH = route<P, unknown>(async (req, { params }: Ctx<P>) => {
   const { id } = await params;
-  await requireEdit(id);
+  await requireAdmin(id);
   const patch = Patch.parse(await req.json());
   const [board] = await db
     .update(boards)
@@ -39,7 +38,7 @@ export const PATCH = route<P, unknown>(async (req, { params }: Ctx<P>) => {
 
 export const DELETE = route<P, unknown>(async (req, { params }: Ctx<P>) => {
   const { id } = await params;
-  const { role } = await requireEdit(id);
+  const { role } = await requireAdmin(id);
   if (role !== "owner") throw new HttpError(403, "Only the owner can delete this board");
   await db.delete(boards).where(eq(boards.id, id));
   await publish(id, { t: "reload" }, origin(req));

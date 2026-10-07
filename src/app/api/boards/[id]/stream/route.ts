@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import { db, boardMembers, boards } from "@/lib/db";
 import { requireView } from "@/lib/auth-helpers";
 import { subscribe, peers, type Envelope } from "@/lib/events";
 import type { Ctx } from "@/lib/route";
@@ -8,12 +10,26 @@ export const runtime = "nodejs";
 /** Server-sent events: one connection per open board tab. */
 export async function GET(req: Request, { params }: Ctx<{ id: string }>) {
   const { id } = await params;
+  let access;
   try {
-    await requireView(id);
+    access = await requireView(id);
   } catch {
     return new Response("forbidden", { status: 403 });
   }
 
+  const userId = access.user?.id;
+  let privateBoard = access.board!.visibility === "private";
+  const membership = userId
+    ? await db
+        .select({ id: boardMembers.userId })
+        .from(boardMembers)
+        .where(
+          and(eq(boardMembers.boardId, id), eq(boardMembers.userId, userId)),
+        )
+        .limit(1)
+    : [];
+  let member = access.role === "owner" || membership.length > 0;
+  const owner = access.board!.ownerId === userId;
   const enc = new TextEncoder();
   let unsub: (() => void) | undefined;
   let beat: ReturnType<typeof setInterval> | undefined;
@@ -28,7 +44,64 @@ export async function GET(req: Request, { params }: Ctx<{ id: string }>) {
         }
       };
       send({ ev: { t: "presence", peers: peers(id) } });
-      unsub = await subscribe(id, send);
+      let delivery = Promise.resolve();
+      let closed = false;
+      const close = () => {
+        closed = true;
+        unsub?.();
+        clearInterval(beat);
+        try {
+          ctrl.close();
+        } catch {
+          /* closed */
+        }
+      };
+      unsub = await subscribe(id, (e) => {
+        // Preserve event order while a reload checks access after a large event.
+        delivery = delivery
+          .then(async () => {
+            if (closed) return;
+            if (e.ev.t === "reload") {
+              const [board] = await db
+                .select({ visibility: boards.visibility })
+                .from(boards)
+                .where(eq(boards.id, id));
+              if (!board) {
+                send({ ev: { t: "reload" } });
+                close();
+                return;
+              }
+              privateBoard = board.visibility === "private";
+              const membership = userId
+                ? await db
+                    .select({ id: boardMembers.userId })
+                    .from(boardMembers)
+                    .where(
+                      and(
+                        eq(boardMembers.boardId, id),
+                        eq(boardMembers.userId, userId),
+                      ),
+                    )
+                    .limit(1)
+                : [];
+              member = owner || membership.length > 0;
+            }
+            if (e.ev.t === "members")
+              member =
+                owner ||
+                (e.ev.members as { id: string }[]).some((m) => m.id === userId);
+            if (e.ev.t === "board")
+              privateBoard =
+                (e.ev.board as { visibility: string }).visibility === "private";
+            if (privateBoard && !member) {
+              send({ ev: { t: "reload" } });
+              close();
+              return;
+            }
+            send(e);
+          })
+          .catch(close);
+      });
       // keep proxies from idling the connection out
       beat = setInterval(() => {
         try {

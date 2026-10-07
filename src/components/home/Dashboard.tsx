@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   useDraggable,
   useDroppable,
@@ -14,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import {
   Download,
+  Check,
   Globe,
   Link2,
   LogOut,
@@ -23,12 +25,14 @@ import {
   Star,
   Upload,
 } from "lucide-react";
+import { BoardCreating } from "./BoardCreating";
 import { toast } from "sonner";
 import { api } from "@/lib/client";
 import { doSignOut } from "@/app/actions";
 import { cx } from "@/lib/utils";
 import { Button, IconButton } from "@/components/ui/Button";
-import { Pop, PopClose } from "@/components/ui/Pop";
+import { HeaderLink } from "@/components/ui/HeaderAction";
+import { Pop } from "@/components/ui/Pop";
 import { Input } from "@/components/ui/Field";
 import { Hint } from "@/components/ui/Hint";
 import { Avatar } from "@/components/ui/Avatar";
@@ -45,6 +49,7 @@ export type BoardCard = {
   ownerId: string;
   updatedAt: string;
   cardCount: number;
+  canManage: boolean;
 };
 
 export function Dashboard({
@@ -56,6 +61,9 @@ export function Dashboard({
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
+  const [dragged, setDragged] = useState<BoardCard | null>(null);
+  const [linkState, setLinkState] = useState<{ id: string; status: "linking" | "linked" } | null>(null);
+  const suppressClick = useRef(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   const shown = useMemo(
@@ -64,23 +72,30 @@ export function Dashboard({
   );
 
   async function onDragEnd(e: DragEndEvent) {
+    setDragged(null);
+    suppressClick.current = true;
+    setTimeout(() => { suppressClick.current = false; }, 250);
     const from = String(e.active.id);
     const onto = e.over ? String(e.over.id) : null;
     if (!onto || onto === from) return;
     const a = boards.find((b) => b.id === from);
     const target = boards.find((b) => b.id === onto);
     if (!a || !target) return;
+    setLinkState({ id: target.id, status: "linking" });
     try {
       await api.post(`/api/boards/${target.id}/links`, { toBoardId: a.id });
+      setLinkState({ id: target.id, status: "linked" });
+      setTimeout(() => setLinkState(current => current?.id === target.id ? null : current), 2000);
       toast.success(`${a.title} linked into ${target.title}`);
       router.refresh();
     } catch (err) {
       toast.error((err as Error).message);
+      setLinkState(null);
     }
   }
 
   return (
-    <div className="mx-auto max-w-[1180px] px-6 py-5">
+    <div className="dashboard-screen mx-auto max-w-[1180px] px-6 py-5">
       <header className="flex items-center gap-2">
         <span className="grid size-7 place-items-center rounded-md border border-line bg-raised">
           <span className="block size-2.5 rounded-[3px] bg-accent" />
@@ -97,10 +112,8 @@ export function Dashboard({
               className="w-36 bg-transparent text-[12.5px] outline-none placeholder:text-faint"
             />
           </div>
-          <Link href="/import" aria-label="Import from Trello">
-            <IconButton icon={<Upload size={15} />} label="Import from Trello" />
-          </Link>
-          <ThemeToggle />
+          <HeaderLink href="/import" icon={<Upload size={16} />} label="Import from Trello" revealLabel="Import" />
+          <ThemeToggle revealLabel />
           <Pop
             align="end"
             className="w-56"
@@ -115,14 +128,12 @@ export function Dashboard({
               Signed in with Discord. Your name and avatar come straight from there.
             </p>
             <form action={doSignOut}>
-              <PopClose asChild>
-                <button
-                  type="submit"
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12.5px] text-muted transition-colors hover:bg-hover hover:text-text"
-                >
-                  <LogOut size={14} /> Sign out
-                </button>
-              </PopClose>
+              <button
+                type="submit"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[12.5px] text-muted transition-colors hover:bg-hover hover:text-text"
+              >
+                <LogOut size={14} /> Sign out
+              </button>
             </form>
           </Pop>
         </div>
@@ -142,12 +153,13 @@ export function Dashboard({
         <CreateBoard />
       </div>
 
-      <DndContext id="boards" sensors={sensors} onDragEnd={onDragEnd}>
+      <DndContext id="boards" sensors={sensors} onDragStart={e => { suppressClick.current = true; setDragged(boards.find(b => b.id === String(e.active.id)) ?? null); }} onDragCancel={() => { setDragged(null); setTimeout(() => { suppressClick.current = false; }, 250); }} onDragEnd={onDragEnd}>
         <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-3">
           {shown.map((b, i) => (
-            <Tile key={b.id} board={b} index={i} />
+            <Tile key={b.id} board={b} index={i} canManage={b.canManage} suppressClick={suppressClick} linkStatus={linkState?.id === b.id ? linkState.status : undefined} />
           ))}
         </div>
+        <DragOverlay dropAnimation={{ duration: 250, easing: "cubic-bezier(0.22,1,0.36,1)" }}>{dragged && <div className="flex rotate-3 items-center gap-3 rounded-xl border border-accent bg-raised p-5 shadow-drag"><Link2 className="text-accent" size={20} /><span className="text-sm font-medium">{dragged.title}</span></div>}</DragOverlay>
       </DndContext>
 
       {!boards.length && (
@@ -175,9 +187,9 @@ export function Dashboard({
   );
 }
 
-function Tile({ board, index }: { board: BoardCard; index: number }) {
+function Tile({ board, index, canManage, suppressClick, linkStatus }: { board: BoardCard; index: number; canManage: boolean; suppressClick: React.RefObject<boolean>; linkStatus?: "linking" | "linked" }) {
   const drag = useDraggable({ id: board.id });
-  const drop = useDroppable({ id: board.id });
+  const drop = useDroppable({ id: board.id, disabled: !canManage });
   const bg = board.background;
 
   return (
@@ -190,6 +202,7 @@ function Tile({ board, index }: { board: BoardCard; index: number }) {
       style={{ animation: `fade-up 0.3s var(--ease-out-quint) ${Math.min(index * 28, 260)}ms both` }}
     >
       <Link
+        onClick={e => { if (suppressClick.current || drag.isDragging) e.preventDefault(); }}
         href={`/b/${board.slug}`}
         ref={drag.setNodeRef}
         {...drag.attributes}
@@ -223,6 +236,7 @@ function Tile({ board, index }: { board: BoardCard; index: number }) {
         </div>
       </Link>
 
+      {linkStatus && <div role="status" className="pointer-events-none absolute inset-0 flex animate-pop-in items-center justify-center gap-2 rounded-lg border border-accent bg-surface/90 text-sm font-medium text-accent backdrop-blur-sm">{linkStatus === "linking" ? <Link2 size={18} className="animate-pulse" /> : <Check size={18} />}{linkStatus === "linking" ? "Linking boards…" : "Boards linked"}</div>}
       {drop.isOver && !drag.isDragging && (
         <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-md bg-accent px-1.5 py-0.5 text-[10.5px] font-medium text-white">
           <Link2 size={10} /> link
@@ -240,28 +254,39 @@ function CreateBoard() {
   const [visibility, setVisibility] = useState<"private" | "public">("private");
   const [color, setColor] = useState(SWATCHES[1]);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const creating = useRef(false);
   const [open, setOpen] = useState(false);
 
   async function create() {
-    if (!title.trim()) return;
+    if (!title.trim() || creating.current) return;
+    creating.current = true;
+    setReady(false);
     setBusy(true);
+    setOpen(false);
     try {
-      const { slug } = await api.post<{ slug: string }>("/api/boards", {
-        title: title.trim(),
-        visibility,
-        background: { kind: "color", value: color },
-      });
-      setOpen(false);
-      setTitle("");
-      router.push(`/b/${slug}`);
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const [{ slug }] = await Promise.all([
+        api.post<{ slug: string }>("/api/boards", {
+          title: title.trim(), visibility, background: { kind: "color", value: color },
+        }),
+        // Let the white sheet cover the viewport before opening the board.
+        new Promise(resolve => setTimeout(resolve, reduced ? 0 : 300)),
+      ]);
+      setReady(true);
+      if (!reduced) await new Promise(resolve => setTimeout(resolve, 60));
+      router.push(`/b/${slug}?appearance=1`);
     } catch (e) {
       toast.error((e as Error).message);
-    } finally {
       setBusy(false);
+      creating.current = false;
+      setOpen(true);
     }
   }
 
   return (
+    <>
+    {busy && <BoardCreating title={title} ready={ready} />}
     <Pop
       open={open}
       onOpenChange={setOpen}
@@ -321,5 +346,6 @@ function CreateBoard() {
         </Button>
       </form>
     </Pop>
+    </>
   );
 }

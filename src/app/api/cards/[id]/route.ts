@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { db, cards } from "@/lib/db";
-import { requireEdit, requireView } from "@/lib/auth-helpers";
+import { db, cards, lists } from "@/lib/db";
+import { HttpError, requireEdit, requireView } from "@/lib/auth-helpers";
 import { route, origin, log, type Ctx } from "@/lib/route";
 import { publish } from "@/lib/events";
 import { getCard, getCardDetail, loadCard } from "@/lib/board-data";
@@ -34,6 +34,11 @@ export const PATCH = route<P, unknown>(async (req, { params }: Ctx<P>) => {
   const { user } = await requireEdit(existing.boardId);
   const { archived, startAt, dueAt, ...rest } = Patch.parse(await req.json());
 
+  if (rest.listId) {
+    const [target] = await db.select().from(lists).where(eq(lists.id, rest.listId));
+    if (!target || target.boardId !== existing.boardId || target.archivedAt) throw new HttpError(422, "Choose a list on this board");
+  }
+  if (rest.linkedBoardId) await requireView(rest.linkedBoardId);
   await db
     .update(cards)
     .set({

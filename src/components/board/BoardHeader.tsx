@@ -3,9 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatDistanceToNow } from "date-fns";
 import {
-  Activity as ActivityIcon,
   Check,
   Copy,
   Download,
@@ -20,22 +18,26 @@ import {
   Star,
   Trash2,
   Unlink,
-  UserPlus,
   X,
 } from "lucide-react";
-import { cx } from "@/lib/utils";
+import { cx, labelTextColor } from "@/lib/utils";
 import { api } from "@/lib/client";
 import { toast } from "sonner";
 import { Button, IconButton, Spinner } from "@/components/ui/Button";
+import { HeaderButton, HeaderLink } from "@/components/ui/HeaderAction";
 import { Pop } from "@/components/ui/Pop";
 import { Hint } from "@/components/ui/Hint";
 import { Avatar, AvatarTip } from "@/components/ui/Avatar";
 import { Input } from "@/components/ui/Field";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import { ActivityDrawer } from "./ActivityDrawer";
+import { PeoplePicker } from "./PeoplePicker";
+import { Drawer } from "@/components/ui/Drawer";
+import { motion, AnimatePresence } from "motion/react";
 import { BackgroundPicker } from "./BackgroundPicker";
 import { MenuItem } from "./ListColumn";
 import { useBoard } from "./store";
-import type { BoardRef, Member } from "@/lib/types";
+import type { BoardRef } from "@/lib/types";
 
 export function BoardHeader({ readOnly }: { readOnly?: boolean }) {
   const b = useBoard();
@@ -45,66 +47,58 @@ export function BoardHeader({ readOnly }: { readOnly?: boolean }) {
   useEffect(() => setTitle(b.board.title), [b.board.title]);
 
   return (
-    <header className="glass z-20 flex h-12 shrink-0 items-center gap-1.5 border-b border-line px-3">
-      <Link
+    <header className="glass z-20 flex min-h-12 shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-3 py-1.5 md:flex-nowrap">
+      <HeaderLink
         href="/"
-        aria-label="All boards"
-        className="grid size-8 place-items-center rounded-md text-muted transition-colors duration-150 hover:bg-hover hover:text-text"
-      >
-        <LayoutGrid size={15} />
-      </Link>
+        label="All boards"
+        revealLabel="Boards"
+        icon={<LayoutGrid size={16} />}
+      />
 
       <input
         value={title}
-        disabled={!b.canEdit}
+        disabled={!b.canManage}
         onChange={(e) => setTitle(e.target.value)}
         onBlur={() =>
           title.trim() && title !== b.board.title && b.patchBoard({ title: title.trim() })
         }
         onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        className="min-w-0 max-w-[280px] flex-none rounded-md border border-transparent bg-transparent px-2 py-1 text-[14px] font-semibold tracking-tight outline-none transition-colors duration-150 hover:border-line focus:border-accent/60 focus:bg-surface"
+        aria-label="Board title"
+        className="min-w-0 max-w-[min(280px,40vw)] shrink rounded-md border border-transparent bg-transparent px-2 py-1 text-[14px] font-semibold tracking-tight outline-none transition-colors duration-150 hover:border-line focus:border-accent/60 focus:bg-surface"
         size={Math.max(6, Math.min(28, title.length))}
       />
 
-      {b.canEdit && (
-        <IconButton
-          size="sm"
+      {b.canManage && (
+        <HeaderButton
           icon={<Star size={14} className={b.board.starred ? "fill-warn text-warn" : ""} />}
           label={b.board.starred ? "Unstar" : "Star this board"}
+          revealLabel={b.board.starred ? "Unstar" : "Star"}
+          aria-pressed={b.board.starred}
           onClick={() => b.patchBoard({ starred: !b.board.starred })}
         />
       )}
 
       <VisibilityChip />
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="scroll-thin ml-auto flex w-full max-w-full shrink-0 items-center gap-1 overflow-x-auto p-1 md:w-auto">
         <PresenceStack />
         {!readOnly && (
           <>
             <FilterPop />
-            <MembersPop />
+            <PeoplePicker />
             <LinksPop />
-            {b.canEdit && (
-              <Pop
-                className="w-72"
-                align="end"
-                title="Background"
-                trigger={<IconButton icon={<Palette size={15} />} label="Background" />}
-              >
-                <BackgroundPicker />
-              </Pop>
-            )}
+            {b.canManage && <AppearanceMenu />}
             <ExportButton />
-            <ActivityPop />
+            <ActivityDrawer />
           </>
         )}
-        <ThemeToggle />
+        <ThemeToggle revealLabel />
         {b.role === "owner" && (
           <Pop
             className="w-56"
             align="end"
             title="Danger zone"
-            trigger={<IconButton icon={<Trash2 size={15} />} label="Delete board" />}
+            trigger={<HeaderButton icon={<Trash2 size={16} />} label="Delete board" danger />}
           >
             <p className="px-1 pb-2 text-[12px] leading-relaxed text-muted">
               Deleting removes every list, card and attachment on this board. There is no undo.
@@ -152,7 +146,7 @@ function VisibilityChip() {
           title="Private"
           body="Only you and the people you invite."
           active={!isPublic}
-          disabled={!b.canEdit}
+          disabled={!b.canManage}
           onClick={() => b.patchBoard({ visibility: "private" })}
         />
         <Option
@@ -160,7 +154,7 @@ function VisibilityChip() {
           title="Public"
           body="Anyone with the link can read it. Good for roadmaps."
           active={isPublic}
-          disabled={!b.canEdit}
+          disabled={!b.canManage}
           onClick={() => b.patchBoard({ visibility: "public" })}
         />
         {isPublic && (
@@ -228,8 +222,8 @@ function PresenceStack() {
   const { peers, connected } = useBoard();
   if (!peers.length) return null;
   return (
-    <div className="mr-1 flex items-center gap-1.5">
-      <div className="flex -space-x-2">
+    <div className="mr-1 flex shrink-0 items-center gap-1.5">
+      <div className="flex -space-x-2 p-1">
         {peers.slice(0, 5).map((p) => (
           <AvatarTip key={p.id} user={p} size={24} ring={p.color} />
         ))}
@@ -259,9 +253,10 @@ function FilterPop() {
       align="end"
       title="Filter"
       trigger={
-        <IconButton
+        <HeaderButton
           icon={<SlidersHorizontal size={15} />}
           label="Filter cards"
+          revealLabel="Filter"
           active={b.matches.active}
         />
       }
@@ -294,11 +289,11 @@ function FilterPop() {
                   }
                   className={cx(
                     "h-5 rounded-sm px-2 text-[11px] transition-[opacity,transform] duration-150",
-                    on ? "opacity-100" : "opacity-45 hover:opacity-80",
+                    on ? "ring-2 ring-accent ring-offset-2 ring-offset-raised" : "hover:brightness-110",
                   )}
-                  style={{ background: l.color, color: "#0b0c0e" }}
+                  style={{ background: l.color, color: labelTextColor(l.color) }}
                 >
-                  {l.name || " "}
+                  {l.name || "Unnamed"}
                 </button>
               );
             })}
@@ -357,90 +352,17 @@ function FilterPop() {
   );
 }
 
-function MembersPop() {
-  const b = useBoard();
-  const [people, setPeople] = useState<Member[] | null>(null);
-  const [q, setQ] = useState("");
-
-  async function load(query = "") {
-    if (!b.canEdit) return;
-    const rows = await api.get<Member[]>(
-      `/api/boards/${b.board.id}/members?q=${encodeURIComponent(query)}`,
-    );
-    setPeople(rows);
-  }
-
-  const memberIds = new Set(b.members.map((m) => m.id));
-
-  return (
-    <Pop
-      className="w-72"
-      align="end"
-      title="People"
-      onOpenChange={(o) => o && !people && void load()}
-      trigger={<IconButton icon={<UserPlus size={15} />} label="People on this board" />}
-    >
-      <div className="space-y-2">
-        <ul className="space-y-0.5">
-          {b.members.map((m) => (
-            <li key={m.id} className="group flex items-center gap-2 rounded-sm px-1 py-1">
-              <Avatar user={m} size={22} />
-              <span className="flex-1 truncate text-[12.5px]">{m.name ?? "Someone"}</span>
-              <span className="text-[10.5px] uppercase tracking-wide text-faint">{m.role}</span>
-              {b.canEdit && m.role !== "owner" && (
-                <span className="opacity-0 transition-opacity group-hover:opacity-100">
-                  <IconButton
-                    size="sm"
-                    icon={<X size={12} />}
-                    label="Remove from board"
-                    onClick={() => b.removeMember(m.id)}
-                  />
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-
-        {b.canEdit && (
-          <div className="border-t border-line-soft pt-2">
-            <div className="flex items-center gap-1.5 pb-1">
-              <Input
-                value={q}
-                placeholder="Search people"
-                className="h-7 text-[12px]"
-                onChange={(e) => {
-                  setQ(e.target.value);
-                  void load(e.target.value);
-                }}
-              />
-              <Hint side="left">
-                Anyone who has signed in with Discord shows up here. Access to the app itself is
-                controlled by the Discord ID allowlist on the server.
-              </Hint>
-            </div>
-            <ul className="scroll-thin max-h-40 space-y-0.5 overflow-y-auto">
-              {(people ?? [])
-                .filter((p) => !memberIds.has(p.id))
-                .map((p) => (
-                  <li key={p.id}>
-                    <button
-                      onClick={() => b.addMember(p.id)}
-                      className="flex w-full items-center gap-2 rounded-sm px-1 py-1 text-left transition-colors hover:bg-hover"
-                    >
-                      <Avatar user={p} size={22} />
-                      <span className="flex-1 truncate text-[12.5px] text-muted">
-                        {p.name ?? "Someone"}
-                      </span>
-                      <UserPlus size={12} className="text-faint" />
-                    </button>
-                  </li>
-                ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    </Pop>
-  );
+function AppearanceMenu() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("appearance") === "1") {
+      setOpen(true);
+      url.searchParams.delete("appearance");
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, []);
+  return <><HeaderButton icon={<Palette size={16} />} label="Appearance" onClick={() => setOpen(true)} /><Drawer open={open} onOpenChange={setOpen} title="Appearance"><BackgroundPicker /></Drawer></>;
 }
 
 function LinksPop() {
@@ -459,9 +381,9 @@ function LinksPop() {
       className="w-72"
       align="end"
       title="Linked boards"
-      onOpenChange={(o) => o && !all && void load()}
+      onOpenChange={(o) => { if (o && !all) void load().catch(e => toast.error(e.message)); }}
       trigger={
-        <IconButton
+        <HeaderButton
           icon={<Link2 size={15} />}
           label="Linked boards"
           active={!!b.linkedBoards.length}
@@ -479,8 +401,8 @@ function LinksPop() {
 
         {!!b.linkedBoards.length && (
           <ul className="space-y-0.5">
-            {b.linkedBoards.map((l) => (
-              <li key={l.id} className="group flex items-center gap-2 rounded-sm px-1 py-1">
+            <AnimatePresence initial={false}>{b.linkedBoards.map((l) => (
+              <motion.li layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} key={l.id} className="group flex items-center gap-2 rounded-sm px-1 py-1">
                 <span
                   className="size-3 rounded-[3px]"
                   style={{
@@ -491,7 +413,7 @@ function LinksPop() {
                 <Link href={`/b/${l.slug}`} className="flex-1 truncate text-[12.5px] hover:underline">
                   {l.title}
                 </Link>
-                {b.canEdit && (
+                {b.canManage && (
                   <span className="opacity-0 transition-opacity group-hover:opacity-100">
                     <IconButton
                       size="sm"
@@ -501,19 +423,19 @@ function LinksPop() {
                     />
                   </span>
                 )}
-              </li>
-            ))}
+              </motion.li>
+            ))}</AnimatePresence>
           </ul>
         )}
 
-        {b.canEdit && (
+        {b.canManage && (
           <ul className="scroll-thin max-h-44 space-y-0.5 overflow-y-auto border-t border-line-soft pt-2">
             {(all ?? [])
               .filter((r) => !linkedIds.has(r.id))
               .map((r) => (
                 <li key={r.id}>
                   <button
-                    onClick={() => b.linkBoard(r.id)}
+                    onClick={() => b.linkBoard(r)}
                     className="flex w-full items-center gap-2 rounded-sm px-1 py-1 text-left transition-colors hover:bg-hover"
                   >
                     <span
@@ -593,61 +515,13 @@ function ExportButton() {
   }
 
   return (
-    <IconButton
+    <HeaderButton
       icon={busy ? <Spinner /> : <Download size={15} />}
       label="Export board as image"
+      revealLabel={busy ? "Exporting…" : "Export"}
+      disabled={busy}
+      aria-busy={busy}
       onClick={run}
     />
-  );
-}
-
-type Row = {
-  id: string;
-  type: string;
-  data: Record<string, unknown> | null;
-  createdAt: string;
-  user: { id: string; name: string | null; image: string | null } | null;
-};
-
-const verbs: Record<string, string> = {
-  "card.create": "added",
-  "card.move": "moved",
-  "card.archive": "archived",
-  "card.delete": "deleted",
-  comment: "commented on",
-};
-
-function ActivityPop() {
-  const b = useBoard();
-  const [rows, setRows] = useState<Row[] | null>(null);
-
-  return (
-    <Pop
-      className="w-80"
-      align="end"
-      title="Activity"
-      onOpenChange={(o) =>
-        o && void api.get<Row[]>(`/api/boards/${b.board.id}/activity`).then(setRows)
-      }
-      trigger={<IconButton icon={<ActivityIcon size={15} />} label="Recent activity" />}
-    >
-      <ul className="scroll-thin max-h-80 space-y-2 overflow-y-auto">
-        {(rows ?? []).map((r) => (
-          <li key={r.id} className="flex gap-2 px-1">
-            <Avatar user={r.user ?? { id: "?", name: null }} size={20} />
-            <p className="flex-1 text-[12px] leading-snug text-muted">
-              <span className="font-medium text-text">{r.user?.name ?? "Someone"}</span>{" "}
-              {verbs[r.type] ?? r.type}{" "}
-              <span className="text-text">{String(r.data?.title ?? "")}</span>
-              <span className="block text-[10.5px] text-faint">
-                {formatDistanceToNow(new Date(r.createdAt), { addSuffix: true })}
-              </span>
-            </p>
-          </li>
-        ))}
-        {rows && !rows.length && <li className="px-1 text-[12px] text-faint">Nothing yet.</li>}
-        {!rows && <li className="px-1 text-[12px] text-faint">Loading…</li>}
-      </ul>
-    </Pop>
   );
 }

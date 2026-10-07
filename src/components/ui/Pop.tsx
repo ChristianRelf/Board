@@ -15,6 +15,8 @@ export function Pop({
   open,
   onOpenChange,
   title,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
 }: {
   trigger: ReactNode;
   children: ReactNode;
@@ -24,6 +26,8 @@ export function Pop({
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   title?: string;
+  onOpenAutoFocus?: (event: Event) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   return (
     <P.Root open={open} onOpenChange={onOpenChange}>
@@ -34,6 +38,8 @@ export function Pop({
           side={side}
           sideOffset={6}
           collisionPadding={12}
+          onOpenAutoFocus={onOpenAutoFocus}
+          onCloseAutoFocus={onCloseAutoFocus}
           asChild
         >
           <motion.div

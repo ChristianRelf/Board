@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -31,6 +31,7 @@ export function ListColumn({
 }) {
   const {
     canEdit,
+    canManage,
     renameList,
     removeList,
     toggleListCollapsed,
@@ -39,13 +40,14 @@ export function ListColumn({
   } = useBoard();
   const [composing, setComposing] = useState(false);
   const [title, setTitle] = useState(list.title);
+  const cardIds = useMemo(() => cards.map((card) => card.id), [cards]);
 
   useEffect(() => setTitle(list.title), [list.title]);
 
   const sortable = useSortable({
     id: list.id,
     data: { type: "list" },
-    disabled: !canEdit,
+    disabled: !canManage,
   });
   const { setNodeRef: setDropRef } = useDroppable({
     id: `dropzone:${list.id}`,
@@ -61,10 +63,11 @@ export function ListColumn({
     return (
       <div
         ref={sortable.setNodeRef}
+        data-list-id={list.id}
         style={style}
         className="panel flex h-fit w-11 shrink-0 flex-col items-center gap-2 rounded-lg py-2.5"
       >
-        {canEdit && (
+        {canManage && (
           <IconButton
             size="sm"
             icon={<ChevronRight size={14} />}
@@ -88,6 +91,7 @@ export function ListColumn({
   return (
     <section
       ref={sortable.setNodeRef}
+      data-list-id={list.id}
       style={style}
       className={cx(
         "panel flex max-h-full w-[288px] shrink-0 flex-col rounded-lg",
@@ -96,7 +100,7 @@ export function ListColumn({
       )}
     >
       <header className="flex items-center gap-1 px-2 pt-2">
-        {canEdit && (
+        {canManage && (
           <button
             ref={sortable.setActivatorNodeRef}
             {...sortable.attributes}
@@ -110,7 +114,7 @@ export function ListColumn({
         )}
         <input
           value={title}
-          disabled={!canEdit}
+          disabled={!canManage}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={() => title.trim() && title !== list.title && renameList(list.id, title.trim())}
           onKeyDown={(e) => {
@@ -122,7 +126,7 @@ export function ListColumn({
         <span className="shrink-0 rounded-sm px-1 text-[11px] tabular-nums text-faint">
           {cards.length}
         </span>
-        {canEdit && (
+        {canManage && (
           <IconButton
             size="sm"
             data-export-hide
@@ -131,7 +135,7 @@ export function ListColumn({
             onClick={() => toggleListCollapsed(list.id)}
           />
         )}
-        {canEdit && (
+        {canManage && (
           <Pop
             className="w-52"
             align="end"
@@ -155,12 +159,12 @@ export function ListColumn({
               label="Copy list title"
               onClick={() => navigator.clipboard.writeText(list.title)}
             />
-            <MenuItem
+            {canManage && <MenuItem
               icon={<Trash2 size={14} />}
               label={cards.length ? `Delete list + ${cards.length} cards` : "Delete list"}
               danger
               onClick={() => removeList(list.id)}
-            />
+            />}
           </Pop>
         )}
       </header>
@@ -169,9 +173,9 @@ export function ListColumn({
         ref={setDropRef}
         className="scroll-thin flex min-h-[8px] flex-1 flex-col gap-1.5 overflow-y-auto p-2"
       >
-        <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext id={list.id} items={cardIds} strategy={verticalListSortingStrategy}>
           {cards.map((c) => (
-            <CardTile key={c.id} card={c} dimmed={matches.active && !matches.test(c)} />
+            <CardTile key={c.id} card={c} listId={list.id} dimmed={matches.active && !matches.test(c)} />
           ))}
         </SortableContext>
         {!cards.length && (

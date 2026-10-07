@@ -8,8 +8,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const id = await boardIdFromSlug(slug);
   if (!id) return { title: "Not found" };
-  const snap = await getSnapshot(id, "viewer");
-  return { title: snap?.board.title ?? "Board" };
+  const { role, board } = await boardAccess(id);
+  return { title: role ? board?.title : "Board" };
 }
 
 export default async function BoardPage({

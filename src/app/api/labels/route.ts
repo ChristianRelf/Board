@@ -1,3 +1,4 @@
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, labels } from "@/lib/db";
 import { requireEdit } from "@/lib/auth-helpers";
@@ -13,7 +14,8 @@ export const POST = route(async (req) => {
     })
     .parse(await req.json());
   await requireEdit(boardId);
-  const [label] = await db.insert(labels).values({ boardId, color, name }).returning();
+  const [last] = await db.select({ position: labels.position }).from(labels).where(eq(labels.boardId, boardId)).orderBy(desc(labels.position)).limit(1);
+  const [label] = await db.insert(labels).values({ boardId, color, name, position: (last?.position ?? 0) + 1024 }).returning();
   await publish(boardId, { t: "label.upsert", label }, origin(req));
   return label;
 });

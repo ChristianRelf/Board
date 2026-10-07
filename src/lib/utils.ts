@@ -67,3 +67,19 @@ export function bytes(n?: number | null) {
   while (n >= 1024 && i < u.length - 1) (n /= 1024), i++;
   return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
 }
+
+/** Pick the higher-contrast foreground using WCAG relative luminance. */
+export function labelTextColor(hex: string) {
+  const raw = hex.replace('#', '');
+  const value = raw.length === 3 ? raw.split('').map(c => c + c).join('') : raw;
+  const rgb = [0, 2, 4].map(i => {
+    const c = parseInt(value.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  return luminance > 0.179 ? '#000000' : '#ffffff';
+}
+
+export function isImageCover(cover: string) {
+  return /^(https?:\/\/|\/api\/files\/)/i.test(cover);
+}

@@ -25,7 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className={inter.variable} style={{ fontFamily: "var(--font-inter), var(--font-sans)" }}>
+      <body className={inter.variable} style={{ fontFamily: "var(--board-font, var(--font-inter)), var(--font-sans)" }}>
         {children}
         <Toaster
           position="bottom-right"

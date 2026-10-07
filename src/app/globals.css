@@ -182,11 +182,151 @@ body[data-dragging="true"] {
   user-select: none;
 }
 
+@layer components {
+  .header-action {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    height: 34px;
+    border-radius: var(--radius-md);
+    color: var(--color-muted);
+    cursor: pointer;
+    transition: background-color 160ms, color 160ms;
+  }
+
+  .header-action-icon {
+    display: grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+  }
+
+  .header-action-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke-width: 1.8;
+  }
+
+  .header-action-label {
+    display: grid;
+    grid-template-columns: 0fr;
+    transition: grid-template-columns 280ms var(--ease-out-quint);
+  }
+
+  .header-action-label > span {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .header-action-label > span > span {
+    display: block;
+    padding-right: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateX(-6px);
+    transition: opacity 180ms ease, transform 280ms var(--ease-out-quint);
+  }
+
+  .header-action:is(:focus-visible, [data-state="open"]) {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
+
+  .header-action:is(:focus-visible, [data-state="open"]) .header-action-label {
+    grid-template-columns: 1fr;
+  }
+
+  .header-action:is(:focus-visible, [data-state="open"]) .header-action-label > span > span {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .header-action:hover {
+      background: var(--color-hover);
+      color: var(--color-text);
+    }
+
+    .header-action:hover .header-action-label {
+      grid-template-columns: 1fr;
+    }
+
+    .header-action:hover .header-action-label > span > span {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .header-action[data-active="true"] {
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+  }
+
+  .header-action[data-danger="true"]:is(:hover, :focus-visible, [data-state="open"]) {
+    background: color-mix(in oklab, var(--color-danger) 12%, transparent);
+    color: var(--color-danger);
+  }
+
+  .header-action:disabled {
+    pointer-events: none;
+    opacity: 0.4;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+.label-pill { transition: width 180ms ease, height 180ms ease, padding 180ms ease; }
+[data-density="compact"] [data-card-id] { padding: 6px; }
+[data-density="compact"] [data-card-id] p { font-size: 12px; }
+/* A single white sheet opens from the center as a board is created. */
+.board-creation-sheet {
+  position: absolute;
+  inset: -3px;
+  background: #fff;
+  animation: board-creation-expand 300ms var(--ease-out-quint) both;
+}
+
+body:has(.board-creation-screen) .dashboard-screen,
+.board-creation-screen {
+  animation: board-creation-shake 180ms ease-out 40ms;
+}
+
+.board-creation-caption {
+  animation: board-creation-caption-in 120ms ease-out 180ms both;
+}
+
+@keyframes board-creation-expand {
+  from { clip-path: inset(calc(50% - 28px) calc(50% - 42px) round 3px); }
+  to { clip-path: inset(0 round 0); }
+}
+
+@keyframes board-creation-shake {
+  0%, 100% { transform: none; }
+  25% { transform: translate3d(-1px, 0.5px, 0); }
+  50% { transform: translate3d(1px, -0.5px, 0); }
+  75% { transform: translate3d(-0.5px, 0, 0); }
+}
+
+@keyframes board-creation-caption-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:has(.board-creation-screen) .dashboard-screen,
+  .board-creation-screen,
+  .board-creation-sheet,
+  .board-creation-caption {
+    animation: none;
   }
 }

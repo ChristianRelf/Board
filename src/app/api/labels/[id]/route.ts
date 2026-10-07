@@ -18,6 +18,7 @@ export const PATCH = route<{ id: string }, unknown>(async (req, { params }) => {
   const patch = z
     .object({
       name: z.string().trim().max(60).nullish(),
+      position: z.number().finite().optional(),
       color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     })
     .parse(await req.json());

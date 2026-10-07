@@ -80,7 +80,9 @@ export async function subscribe(boardId: string, fn: Sub) {
 
 export async function publish(boardId: string, ev: BoardEvent, origin?: string) {
   const env: Envelope = { boardId, origin, ev };
-  await pool.query("SELECT pg_notify($1, $2)", [CHANNEL, JSON.stringify(env)]);
+  let payload = JSON.stringify(env);
+  if (Buffer.byteLength(payload) > 7500) payload = JSON.stringify({ boardId, origin, ev: { t: "reload" } });
+  await pool.query("SELECT pg_notify($1, $2)", [CHANNEL, payload]);
 }
 
 /* ─────────────────────────── presence ─────────────────────────── */

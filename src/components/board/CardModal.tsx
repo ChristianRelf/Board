@@ -1,27 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
 import { format, formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import {
   AlignLeft,
   Archive,
   ArrowUpRight,
+  CalendarDays,
   Check,
-  CheckSquare,
-  Clock,
+  Copy,
   Image as ImageIcon,
+  ListChecks,
   Link2,
+  MessageSquare,
+  PanelsTopLeft,
   Paperclip,
   Plus,
   Send,
-  Tag,
+  Tags,
   Trash2,
   Upload,
-  Users,
+  UsersRound,
   X,
 } from "lucide-react";
-import { bytes, cx } from "@/lib/utils";
+import { toast } from "sonner";
+import { bytes, cx, isImageCover } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
 import { Button, IconButton, Spinner } from "@/components/ui/Button";
 import { Pop } from "@/components/ui/Pop";
@@ -39,7 +43,7 @@ export function CardModal() {
   const detail = b.openCardId ? b.detail[b.openCardId] : undefined;
 
   useEffect(() => {
-    if (b.openCardId) void b.loadDetail(b.openCardId);
+    if (b.openCardId) void b.loadDetail(b.openCardId).catch(e => toast.error(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [b.openCardId]);
 
@@ -49,7 +53,7 @@ export function CardModal() {
       onOpenChange={(v) => !v && b.open(null)}
       label={card?.title ?? "Card"}
     >
-      {card && <Body card={card} detail={detail} />}
+      {card && <Body key={card.id} card={card} detail={detail} />}
     </Modal>
   );
 }
@@ -66,6 +70,7 @@ function Body({
   const [title, setTitle] = useState(card.title);
   const [desc, setDesc] = useState(card.description ?? "");
   const [editingDesc, setEditingDesc] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const cardLabels = b.labels.filter((l) => card.labelIds.includes(l.id));
   const cardMembers = b.members.filter((m) => card.memberIds.includes(m.id));
 
@@ -73,6 +78,8 @@ function Body({
   useEffect(() => setDesc(card.description ?? ""), [card.description]);
 
   return (
+    <>
+    {card.cover && <div className={cx("w-full rounded-t-xl bg-cover bg-center", isImageCover(card.cover) ? "h-44" : "h-16")} style={isImageCover(card.cover) ? { backgroundImage: `url(${JSON.stringify(card.cover)})` } : { background: card.cover }} />}
     <div className="grid gap-5 p-5 pr-12 md:grid-cols-[1fr_190px]">
       {/* ── main column ───────────────────────────────────── */}
       <div className="min-w-0 space-y-5">
@@ -126,7 +133,7 @@ function Body({
           </div>
         )}
 
-        <Section icon={<AlignLeft size={13} />} title="Description">
+        <Section icon={<AlignLeft size={15} />} title="Description">
           {editingDesc ? (
             <div className="space-y-2">
               <Textarea
@@ -179,46 +186,52 @@ function Body({
         <Comments card={card} detail={detail} />
       </div>
 
-      {/* ── side rail: icons, tooltips do the talking ──────── */}
-      <aside className="space-y-1.5">
-        <RailGroup label="Add">
+      {/* ── side rail ────────────────────────────────────── */}
+      <aside className="space-y-4 md:border-l md:border-line-soft md:pl-4" aria-label="Card actions">
+        <RailGroup label="Add to card">
           <RailPop
-            icon={<Tag size={14} />}
+            icon={<Tags />}
             label="Labels"
             title="Labels"
+            active={cardLabels.length > 0}
             content={<LabelPicker card={card} />}
           />
           <RailPop
-            icon={<Users size={14} />}
+            icon={<UsersRound />}
             label="Members"
             title="Members"
+            active={cardMembers.length > 0}
             content={<MemberPicker card={card} />}
           />
           <RailPop
-            icon={<Clock size={14} />}
+            icon={<CalendarDays />}
             label="Due date"
             title="Due date"
+            active={!!card.dueAt}
             className="w-72"
             content={<DueEditor card={card} />}
           />
           <RailPop
-            icon={<ImageIcon size={14} />}
+            icon={<ImageIcon />}
             label="Cover"
             title="Cover"
+            active={!!card.cover}
             content={<CoverPicker card={card} />}
           />
           <RailPop
-            icon={<Link2 size={14} />}
+            icon={<PanelsTopLeft />}
             label="Linked board"
             title="Linked board"
+            active={!!card.linkedBoard}
             content={<LinkedBoardPicker card={card} />}
           />
         </RailGroup>
 
-        <RailGroup label="Card">
+        <RailGroup label="Actions">
           <RailButton
-            icon={<Paperclip size={14} />}
-            label="Copy link to card"
+            icon={<Copy />}
+            label="Copy link"
+            aria-label="Copy link to card"
             onClick={() => {
               navigator.clipboard.writeText(
                 `${location.origin}/b/${b.board.slug}?card=${card.id}`,
@@ -226,7 +239,7 @@ function Body({
             }}
           />
           <RailButton
-            icon={<Archive size={14} />}
+            icon={<Archive />}
             label="Archive"
             onClick={() => {
               b.patchCard(card.id, { archived: true });
@@ -234,13 +247,11 @@ function Body({
             }}
           />
           <RailButton
-            icon={<Trash2 size={14} />}
-            label="Delete forever"
+            icon={<Trash2 />}
+            label="Delete card"
+            aria-label="Delete card forever"
             danger
-            onClick={() => {
-              b.removeCard(card.id);
-              b.open(null);
-            }}
+            onClick={() => setConfirmDelete(true)}
           />
         </RailGroup>
 
@@ -249,6 +260,17 @@ function Body({
         </p>
       </aside>
     </div>
+    <Modal open={confirmDelete} onOpenChange={setConfirmDelete} label="Delete this card?" className="max-w-md">
+      <div className="space-y-4 p-6">
+        <h2 className="pr-8 text-lg font-semibold">Delete this card?</h2>
+        <p className="text-sm text-muted">“{card.title}” and its checklist, comments and attachments will be removed. This cannot be undone without a board backup.</p>
+        <div className="flex justify-end gap-2">
+          <Button onClick={() => setConfirmDelete(false)}>Keep card</Button>
+          <Button variant="danger" onClick={() => { b.removeCard(card.id); setConfirmDelete(false); b.open(null); }}>Delete permanently</Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
 
@@ -268,7 +290,7 @@ function Section({
   return (
     <section>
       <header className="mb-1.5 flex items-center gap-2 px-1.5">
-        <span className="text-faint">{icon}</span>
+        <span aria-hidden="true" className="text-muted [&>svg]:stroke-[1.75]">{icon}</span>
         <h3 className="text-[11px] font-medium uppercase tracking-wide text-faint">{title}</h3>
         <div className="ml-auto flex items-center gap-1">{action}</div>
       </header>
@@ -280,10 +302,10 @@ function Section({
 function RailGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="px-1 pb-1 text-[10.5px] font-medium uppercase tracking-wide text-faint">
+      <p className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">
         {label}
       </p>
-      <div className="grid grid-cols-5 gap-1 md:grid-cols-3">{children}</div>
+      <div className="grid grid-cols-2 gap-1.5 md:grid-cols-1">{children}</div>
     </div>
   );
 }
@@ -294,12 +316,14 @@ function RailPop({
   title,
   content,
   className,
+  active,
 }: {
   icon: React.ReactNode;
   label: string;
   title: string;
   content: React.ReactNode;
   className?: string;
+  active?: boolean;
 }) {
   const { canEdit } = useBoard();
   return (
@@ -309,11 +333,10 @@ function RailPop({
       title={title}
       className={className}
       trigger={
-        <IconButton
+        <RailButton
           icon={icon}
           label={label}
-          side="left"
-          variant="outline"
+          active={active}
           disabled={!canEdit}
         />
       }
@@ -323,29 +346,48 @@ function RailPop({
   );
 }
 
-function RailButton({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
+const RailButton = forwardRef<HTMLButtonElement, Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
   icon: React.ReactNode;
   label: string;
-  onClick: () => void;
   danger?: boolean;
-}) {
+  active?: boolean;
+}>(function RailButton({
+  icon,
+  label,
+  danger,
+  active,
+  className,
+  ...props
+}, ref) {
   const { canEdit } = useBoard();
   return (
-    <IconButton
-      icon={icon}
-      label={label}
-      side="left"
-      variant={danger ? "danger" : "outline"}
-      onClick={onClick}
+    <button
+      ref={ref}
+      type="button"
       disabled={!canEdit}
-    />
+      className={cx(
+        "flex min-h-9 w-full items-center gap-2.5 rounded-md border px-2 py-1.5 text-left text-[12px] font-medium transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40",
+        danger
+          ? "border-transparent text-danger hover:border-danger/20 hover:bg-danger/10"
+          : "border-line-soft bg-raised/50 text-muted hover:border-line hover:bg-hover hover:text-text data-[state=open]:border-accent/30 data-[state=open]:bg-accent-soft/30 data-[state=open]:text-text",
+        className,
+      )}
+      {...props}
+    >
+      <span
+        aria-hidden="true"
+        className={cx(
+          "grid size-5 shrink-0 place-items-center [&>svg]:size-4 [&>svg]:stroke-[1.75]",
+          active && !danger && "text-accent",
+        )}
+      >
+        {icon}
+      </span>
+      <span className="flex-1">{label}</span>
+      {active && <span className="size-1.5 shrink-0 rounded-full bg-accent"><span className="sr-only">Added to card</span></span>}
+    </button>
   );
-}
+});
 
 function Checklist({
   card,
@@ -356,28 +398,38 @@ function Checklist({
 }) {
   const b = useBoard();
   const [value, setValue] = useState("");
-  const items = detail?.checkItems ?? [];
+  const pending = b.pendingChecks[card.id] ?? [];
+  const items = [...(detail?.checkItems ?? []), ...pending.filter(p => !detail?.checkItems.some(i => i.id === p.id))];
+  const draft = useRef("");
+  function commit() {
+    const text = draft.current.trim();
+    if (!text) return;
+    draft.current = "";
+    setValue("");
+    void b.addCheck(card.id, text);
+  }
   if (!items.length && !b.canEdit) return null;
 
   return (
     <Section
-      icon={<CheckSquare size={13} />}
+      icon={<ListChecks size={15} />}
       title="Checklist"
       action={
         items.length ? (
           <span className="flex items-center gap-1.5 text-[11px] tabular-nums text-faint">
-            <ChecklistRing done={card.counts.checkDone} total={card.counts.checkTotal} />
-            {card.counts.checkDone}/{card.counts.checkTotal}
+            <ChecklistRing done={items.filter(i => i.done).length} total={items.length} />
+            {items.filter(i => i.done).length}/{items.length}
           </span>
         ) : null
       }
     >
       <div className="space-y-0.5">
+        {!detail && card.counts.checkTotal > 0 && <div className="skeleton h-12 rounded-md" aria-label="Loading checklist" />}
         {items.map((it) => (
           <div key={it.id} className="group flex items-center gap-2 rounded-sm px-1.5 py-1 hover:bg-hover">
             <button
               aria-label={it.done ? "Mark not done" : "Mark done"}
-              disabled={!b.canEdit}
+              disabled={!b.canEdit || pending.some(p => p.id === it.id)}
               onClick={() => b.patchCheck(card.id, it.id, { done: !it.done })}
               className={cx(
                 "grid size-4 shrink-0 place-items-center rounded-[4px] border transition-colors duration-150",
@@ -400,6 +452,7 @@ function Checklist({
                   size="sm"
                   icon={<X size={12} />}
                   label="Remove item"
+                  disabled={pending.some(p => p.id === it.id)}
                   onClick={() => b.removeCheck(card.id, it.id)}
                 />
               </span>
@@ -410,17 +463,17 @@ function Checklist({
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              const t = value.trim();
-              if (!t) return;
-              setValue("");
-              void b.addCheck(card.id, t);
+              commit();
             }}
             className="flex items-center gap-1.5 px-1.5 pt-1"
           >
             <Plus size={13} className="text-faint" />
             <input
               value={value}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => { draft.current = e.target.value; setValue(e.target.value); }}
+              onBlur={commit}
+              onKeyDown={e => { if (e.key === "Escape") { draft.current = ""; setValue(""); e.currentTarget.blur(); } }}
+              maxLength={500}
               placeholder="Add an item"
               className="flex-1 bg-transparent py-1 text-[13px] outline-none placeholder:text-faint"
             />
@@ -458,7 +511,7 @@ function Attachments({
 
   return (
     <Section
-      icon={<Paperclip size={13} />}
+      icon={<Paperclip size={15} />}
       title="Attachments"
       action={
         b.canEdit && (
@@ -598,7 +651,7 @@ function Comments({ card, detail }: { card: { id: string }; detail?: CardDetail 
   const items = detail?.comments ?? [];
 
   return (
-    <Section icon={<Send size={13} />} title="Comments">
+    <Section icon={<MessageSquare size={15} />} title="Comments">
       {b.canEdit && (
         <form
           className="mb-2 flex items-start gap-2 px-1.5"
@@ -648,7 +701,7 @@ function Comments({ card, detail }: { card: { id: string }; detail?: CardDetail 
             )}
           </li>
         ))}
-        {!items.length && <li className="px-1.5 text-[12px] text-faint">Nothing yet.</li>}
+        {!detail ? <li className="skeleton h-10 rounded-md" aria-label="Loading comments" /> : !items.length && <li className="px-1.5 text-[12px] text-faint">Nothing yet.</li>}
       </ul>
     </Section>
   );

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, lists } from "@/lib/db";
-import { requireEdit } from "@/lib/auth-helpers";
+import { requireAdmin } from "@/lib/auth-helpers";
 import { route, origin } from "@/lib/route";
 import { publish } from "@/lib/events";
 import { STEP } from "@/lib/order";
@@ -14,7 +14,7 @@ const Body = z.object({
 
 export const POST = route(async (req) => {
   const { boardId, title, position } = Body.parse(await req.json());
-  await requireEdit(boardId);
+  await requireAdmin(boardId);
   const last = await db
     .select({ position: lists.position })
     .from(lists)

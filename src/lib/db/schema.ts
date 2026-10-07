@@ -76,6 +76,9 @@ export type Background = {
   value: string;
   /** darken overlay 0-1, keeps text legible over photos */
   dim?: number;
+  font?: "system" | "serif" | "mono" | "rounded";
+  accent?: string;
+  density?: "comfortable" | "compact";
 };
 
 export const boards = pgTable(
@@ -109,7 +112,7 @@ export const boardMembers = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role", { enum: ["owner", "editor", "viewer"] })
+    role: text("role", { enum: ["owner", "admin", "editor", "viewer"] })
       .notNull()
       .default("editor"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -186,6 +189,7 @@ export const labels = pgTable(
       .references(() => boards.id, { onDelete: "cascade" }),
     name: text("name"),
     color: text("color").notNull(),
+    position: doublePrecision("position").notNull().default(0),
   },
   (t) => [index("label_board_idx").on(t.boardId)],
 );
@@ -332,3 +336,13 @@ export const commentRelations = relations(comments, ({ one }) => ({
 export const checkItemRelations = relations(checkItems, ({ one }) => ({
   card: one(cards, { fields: [checkItems.cardId], references: [cards.id] }),
 }));
+
+/** Content snapshots deliberately exclude membership and ownership. */
+export const boardBackups = pgTable("board_backup", {
+  id: id(),
+  boardId: text("board_id").notNull().references(() => boards.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  data: jsonb("data").notNull(),
+  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("backup_board_idx").on(t.boardId, t.createdAt)]);

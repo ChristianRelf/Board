@@ -21,7 +21,7 @@ export function BoardsRail() {
   return (
     <div
       data-export-hide
-      className="pointer-events-none absolute bottom-3 left-4 z-10 flex items-end gap-2"
+      className="pointer-events-none absolute bottom-3 left-16 z-10 flex items-end gap-2"
     >
       <div
         className={cx(
@@ -72,7 +72,7 @@ function Chip({ board, draggable }: { board: BoardRef; draggable: boolean }) {
       {...attributes}
       {...listeners}
       className={cx(
-        "flex shrink-0 cursor-grab items-center gap-1.5 rounded-md border border-line bg-raised px-2 py-1 text-[12px] transition-colors duration-150 hover:bg-hover active:cursor-grabbing",
+        "animate-fade-up flex shrink-0 cursor-grab items-center gap-1.5 rounded-md border border-line bg-raised px-2 py-1 text-[12px] transition-colors duration-150 hover:bg-hover active:cursor-grabbing",
         isDragging && "opacity-40",
       )}
     >

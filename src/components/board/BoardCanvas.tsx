@@ -7,15 +7,17 @@ import {
   KeyboardSensor,
   MeasuringStrategy,
   PointerSensor,
+  closestCenter,
   closestCorners,
   pointerWithin,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, horizontalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { Plus } from "lucide-react";
 import { BoardsRail } from "./BoardsRail";
 import { CardGhost } from "./CardTile";
@@ -25,9 +27,56 @@ import type { CardT } from "@/lib/types";
 
 type Order = Record<string, string[]>;
 
+// Resolve the column first so its surrounding drop zone cannot mask a card.
+// Pointer drops outside a column deliberately have no target.
+const collisionDetection: CollisionDetection = (args) => {
+  const columns = args.droppableContainers.filter((entry) => entry.data.current?.type === "list");
+  if (args.active.data.current?.type === "list") {
+    return closestCenter({ ...args, droppableContainers: columns });
+  }
+
+  if (!args.pointerCoordinates) {
+    return closestCorners({
+      ...args,
+      droppableContainers: args.droppableContainers.filter((entry) =>
+        entry.data.current?.type === "card" || entry.data.current?.type === "list-body",
+      ),
+    });
+  }
+
+  const [column] = pointerWithin({ ...args, droppableContainers: columns });
+  if (!column) return [];
+
+  const cards = args.droppableContainers.filter((entry) =>
+    entry.data.current?.type === "card" && entry.data.current?.listId === column.id,
+  );
+  if (cards.length) {
+    const direct = pointerWithin({ ...args, droppableContainers: cards });
+    // Use the pointer rather than the overlay's centre for tall cards.
+    return direct.length ? direct : closestCenter({
+      ...args,
+      collisionRect: {
+        ...args.collisionRect,
+        top: args.pointerCoordinates.y,
+        bottom: args.pointerCoordinates.y,
+        left: args.pointerCoordinates.x,
+        right: args.pointerCoordinates.x,
+        width: 0,
+        height: 0,
+      },
+      droppableContainers: cards,
+    });
+  }
+
+  const body = args.droppableContainers.find((entry) =>
+    entry.data.current?.type === "list-body" && entry.data.current?.listId === column.id,
+  );
+  return [{ id: body?.id ?? column.id }];
+};
+
 export function BoardCanvas() {
   const board = useBoard();
-  const { lists, cards, cardsByList, canEdit, moveCard, moveList, addCard, addList } = board;
+  const { lists, cards, cardsByList, canManage, moveCard, moveList, addCard, addList } = board;
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<"card" | "list" | "board" | null>(null);
@@ -36,7 +85,7 @@ export function BoardCanvas() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const cardById = useMemo(() => new Map(cards.map((c) => [c.id, c])), [cards]);
@@ -56,6 +105,7 @@ export function BoardCanvas() {
         .filter((l): l is (typeof lists)[number] => !!l),
     [listOrder, lists],
   );
+  const listIds = useMemo(() => shownLists.map((list) => list.id), [shownLists]);
 
   /** Cards per list, honouring the in-flight drag preview. Memoised so the
    *  sortable contexts keep stable item arrays and stop re-measuring. */
@@ -196,10 +246,7 @@ export function BoardCanvas() {
     <DndContext
       id="board"
       sensors={sensors}
-      collisionDetection={(args) => {
-        const within = pointerWithin(args);
-        return within.length ? within : closestCorners(args);
-      }}
+      collisionDetection={collisionDetection}
       measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -212,7 +259,7 @@ export function BoardCanvas() {
         style={{ maxHeight: "100%" }}
       >
         <SortableContext
-          items={shownLists.map((l) => l.id)}
+          items={listIds}
           strategy={horizontalListSortingStrategy}
         >
           {shownLists.map((l) => (
@@ -220,7 +267,7 @@ export function BoardCanvas() {
           ))}
         </SortableContext>
 
-        {canEdit && <AddList onAdd={addList} />}
+        {canManage && <AddList onAdd={addList} />}
       </div>
 
       <BoardsRail />

@@ -1,3 +1,4 @@
+import { BackgroundInput } from "@/lib/appearance";
 import { z } from "zod";
 import { db, boards, boardMembers, labels, lists } from "@/lib/db";
 import { requireUser } from "@/lib/auth-helpers";
@@ -15,9 +16,7 @@ export const GET = route(async () => {
 const Create = z.object({
   title: z.string().trim().min(1).max(120),
   visibility: z.enum(["private", "public"]).default("private"),
-  background: z
-    .object({ kind: z.enum(["color", "image"]), value: z.string(), dim: z.number().optional() })
-    .nullish(),
+  background: BackgroundInput.nullish(),
   starter: z.boolean().default(true),
 });
 
@@ -40,7 +39,7 @@ export const POST = route(async (req) => {
     await tx.insert(boardMembers).values({ boardId: b.id, userId: user.id, role: "owner" });
     await tx
       .insert(labels)
-      .values(LABEL_COLORS.map((c) => ({ boardId: b.id, color: c.hex, name: null })));
+      .values(LABEL_COLORS.map((c, i) => ({ boardId: b.id, color: c.hex, name: c.name, position: i * STEP })));
     if (body.starter)
       await tx.insert(lists).values(
         ["Backlog", "In progress", "Done"].map((title, i) => ({

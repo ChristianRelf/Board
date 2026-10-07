@@ -6,10 +6,10 @@ export type Member = {
   id: string;
   name: string | null;
   image: string | null;
-  role: "owner" | "editor" | "viewer";
+  role: "owner" | "admin" | "editor" | "viewer";
 };
 
-export type Label = { id: string; name: string | null; color: string };
+export type Label = { id: string; name: string | null; color: string; position: number };
 
 export type ListT = {
   id: string;
@@ -84,7 +84,7 @@ export type BoardSnapshot = {
     starred: boolean;
     ownerId: string;
   };
-  role: "owner" | "editor" | "viewer";
+  role: "owner" | "admin" | "editor" | "viewer";
   lists: ListT[];
   cards: CardT[];
   labels: Label[];

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, lists } from "@/lib/db";
-import { HttpError, requireEdit } from "@/lib/auth-helpers";
+import { HttpError, requireAdmin } from "@/lib/auth-helpers";
 import { route, origin, type Ctx } from "@/lib/route";
 import { publish } from "@/lib/events";
 
@@ -10,7 +10,7 @@ type P = { id: string };
 async function load(id: string) {
   const [list] = await db.select().from(lists).where(eq(lists.id, id));
   if (!list) throw new HttpError(404, "List not found");
-  await requireEdit(list.boardId);
+  await requireAdmin(list.boardId);
   return list;
 }
 
